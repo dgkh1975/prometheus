@@ -6,6 +6,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/prometheus/prometheus)](https://goreportcard.com/report/github.com/prometheus/prometheus)
 [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/486/badge)](https://bestpractices.coreinfrastructure.org/projects/486)
 [![Gitpod ready-to-code](https://img.shields.io/badge/Gitpod-ready--to--code-blue?logo=gitpod)](https://gitpod.io/#https://github.com/prometheus/prometheus)
+[![Fuzzing Status](https://oss-fuzz-build-logs.storage.googleapis.com/badges/prometheus.svg)](https://bugs.chromium.org/p/oss-fuzz/issues/list?sort=-opened&can=1&q=proj:prometheus)
 
 Visit [prometheus.io](https://prometheus.io) for the full documentation,
 examples and guides.
@@ -90,8 +91,18 @@ The Makefile provides several targets:
   * *test-short*: run the short tests
   * *format*: format the source code
   * *vet*: check the source code for common errors
-  * *docker*: build a docker container for the current `HEAD`
   * *assets*: build the new experimental React UI
+
+### Building the Docker image
+
+The `make docker` target is designed for use in our CI system.
+You can build a docker image locally with the following commands:
+
+    $ make promu
+    $ promu crossbuild -p linux/amd64
+    $ make common-docker-amd64
+
+*NB* if you are on a Mac, you will need [gnu-tar](https://formulae.brew.sh/formula/gnu-tar).
 
 ## React UI Development
 

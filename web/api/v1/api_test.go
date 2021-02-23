@@ -56,7 +56,6 @@ import (
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/storage/remote"
 	"github.com/prometheus/prometheus/tsdb"
-	"github.com/prometheus/prometheus/tsdb/chunks"
 	"github.com/prometheus/prometheus/util/teststorage"
 )
 
@@ -1700,6 +1699,20 @@ func testEndpoints(t *testing.T, api *API, tr *testTargetRetriever, testLabelAPI
 					"boo",
 				},
 			},
+			// Try to overlap the selected series set as much as possible to test that the value de-duplication works.
+			{
+				endpoint: api.labelValues,
+				params: map[string]string{
+					"name": "foo",
+				},
+				query: url.Values{
+					"match[]": []string{`test_metric4{dup=~"^1"}`, `test_metric4{foo=~".+o$"}`},
+				},
+				response: []string{
+					"bar",
+					"boo",
+				},
+			},
 			// Label names.
 			{
 				endpoint: api.labelNames,
@@ -2267,7 +2280,9 @@ func (f *fakeDB) Stats(statsByLabelName string) (_ *tsdb.Stats, retErr error) {
 			retErr = err
 		}
 	}()
-	h, _ := tsdb.NewHead(nil, nil, nil, 1000, "", nil, chunks.DefaultWriteBufferSize, tsdb.DefaultStripeSize, nil)
+	opts := tsdb.DefaultHeadOptions()
+	opts.ChunkRange = 1000
+	h, _ := tsdb.NewHead(nil, nil, nil, opts)
 	return h.Stats(statsByLabelName), nil
 }
 
@@ -2924,5 +2939,113 @@ func BenchmarkRespond(b *testing.B) {
 	api := API{}
 	for n := 0; n < b.N; n++ {
 		api.respond(&testResponseWriter, response, nil)
+	}
+}
+
+func TestGetGlobalURL(t *testing.T) {
+	mustParseURL := func(t *testing.T, u string) *url.URL {
+		parsed, err := url.Parse(u)
+		require.NoError(t, err)
+		return parsed
+	}
+
+	testcases := []struct {
+		input    *url.URL
+		opts     GlobalURLOptions
+		expected *url.URL
+		errorful bool
+	}{
+		{
+			mustParseURL(t, "http://127.0.0.1:9090"),
+			GlobalURLOptions{
+				ListenAddress: "127.0.0.1:9090",
+				Host:          "127.0.0.1:9090",
+				Scheme:        "http",
+			},
+			mustParseURL(t, "http://127.0.0.1:9090"),
+			false,
+		},
+		{
+			mustParseURL(t, "http://127.0.0.1:9090"),
+			GlobalURLOptions{
+				ListenAddress: "127.0.0.1:9090",
+				Host:          "prometheus.io",
+				Scheme:        "https",
+			},
+			mustParseURL(t, "https://prometheus.io"),
+			false,
+		},
+		{
+			mustParseURL(t, "http://exemple.com"),
+			GlobalURLOptions{
+				ListenAddress: "127.0.0.1:9090",
+				Host:          "prometheus.io",
+				Scheme:        "https",
+			},
+			mustParseURL(t, "http://exemple.com"),
+			false,
+		},
+		{
+			mustParseURL(t, "http://localhost:8080"),
+			GlobalURLOptions{
+				ListenAddress: "127.0.0.1:9090",
+				Host:          "prometheus.io",
+				Scheme:        "https",
+			},
+			mustParseURL(t, "http://prometheus.io:8080"),
+			false,
+		},
+		{
+			mustParseURL(t, "http://[::1]:8080"),
+			GlobalURLOptions{
+				ListenAddress: "127.0.0.1:9090",
+				Host:          "prometheus.io",
+				Scheme:        "https",
+			},
+			mustParseURL(t, "http://prometheus.io:8080"),
+			false,
+		},
+		{
+			mustParseURL(t, "http://localhost"),
+			GlobalURLOptions{
+				ListenAddress: "127.0.0.1:9090",
+				Host:          "prometheus.io",
+				Scheme:        "https",
+			},
+			mustParseURL(t, "http://prometheus.io"),
+			false,
+		},
+		{
+			mustParseURL(t, "http://localhost:9091"),
+			GlobalURLOptions{
+				ListenAddress: "[::1]:9090",
+				Host:          "[::1]",
+				Scheme:        "https",
+			},
+			mustParseURL(t, "http://[::1]:9091"),
+			false,
+		},
+		{
+			mustParseURL(t, "http://localhost:9091"),
+			GlobalURLOptions{
+				ListenAddress: "[::1]:9090",
+				Host:          "[::1]:9090",
+				Scheme:        "https",
+			},
+			mustParseURL(t, "http://[::1]:9091"),
+			false,
+		},
+	}
+
+	for i, tc := range testcases {
+		t.Run(fmt.Sprintf("Test %d", i), func(t *testing.T) {
+			output, err := getGlobalURL(tc.input, tc.opts)
+			if tc.errorful {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.expected, output)
+		})
 	}
 }
